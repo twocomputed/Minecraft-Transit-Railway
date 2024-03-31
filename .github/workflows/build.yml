@@ -11,6 +11,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@main
+      - name: Set short git commit SHA
+        id: vars
+        run: |
+          calculatedSha=$(git rev-parse --short ${{ github.sha }})
+          echo "COMMIT_SHORT_SHA=$calculatedSha" >> $GITHUB_ENV
+      - name: Confirm git commit SHA output
+        run: echo ${{ env.COMMIT_SHORT_SHA }}
       - name: Validate gradle wrapper
         uses: gradle/wrapper-validation-action@main
       - name: Setup JDK 17
@@ -21,7 +28,7 @@ jobs:
       - name: Make gradle wrapper executable
         run: chmod +x ./gradlew
       - name: Change version
-        run: sed 's/4.0.0-beta-6/git-${{ steps.vars.outputs.sha_short }}/' build.gradle
+        run: sed 's/4.0.0-beta-6/git-${{ env.COMMIT_SHORT_SHA }}/' build.gradle
       - name: Setup Fabric files
         run: ./gradlew fabric:setupFiles -PminecraftVersion="${{ matrix.minecraft }}" -PpatreonApiKey="${{ secrets.PATREON_API_KEY }}"
       - name: Setup Forge files
