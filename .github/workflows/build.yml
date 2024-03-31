@@ -20,6 +20,8 @@ jobs:
           distribution: 'zulu'
       - name: Make gradle wrapper executable
         run: chmod +x ./gradlew
+      - name: Change version
+        run: sed 's/4.0.0-beta-6/git-${{ steps.vars.outputs.sha_short }}/' build.gradle
       - name: Setup Fabric files
         run: ./gradlew fabric:setupFiles -PminecraftVersion="${{ matrix.minecraft }}" -PpatreonApiKey="${{ secrets.PATREON_API_KEY }}"
       - name: Setup Forge files
