@@ -11,6 +11,7 @@ import org.mtr.mapping.holder.OverlayTexture;
 import org.mtr.mapping.holder.Vector3d;
 import org.mtr.mapping.mapper.GraphicsHolder;
 import org.mtr.mapping.mapper.ModelPartExtension;
+import org.mtr.mapping.mapper.OptimizedModel;
 import org.mtr.mod.Init;
 import org.mtr.mod.MutableBox;
 import org.mtr.mod.client.CustomResourceLoader;
@@ -24,6 +25,8 @@ import org.mtr.mod.render.StoredMatrixTransformations;
 
 import javax.annotation.Nullable;
 import java.util.Comparator;
+import java.util.Map;
+import java.util.function.Supplier;
 
 public final class ModelPropertiesPart extends ModelPropertiesPartSchema implements IGui {
 
@@ -39,6 +42,14 @@ public final class ModelPropertiesPart extends ModelPropertiesPartSchema impleme
 		updateData(readerBase);
 		displayColorInt = parseColor(displayColor, 0xFF9900);
 		displayColorCjkInt = parseColor(displayColorCjk, displayColorInt);
+	}
+
+	ModelPropertiesPart(ObjectSet<String> names) {
+		super(PartCondition.NORMAL, RenderStage.EXTERIOR, PartType.NORMAL, 0, 0, "", "", 0, 0, 0, DisplayType.DESTINATION, "", 0, 0, DoorAnimationType.STANDARD);
+		this.names.addAll(names);
+		positionDefinitions.add("");
+		displayColorInt = 0;
+		displayColorCjkInt = 0;
 	}
 
 	/**
@@ -77,7 +88,7 @@ public final class ModelPropertiesPart extends ModelPropertiesPartSchema impleme
 		if (isDoor()) {
 			final OptimizedModelWrapper.MaterialGroupWrapper materialGroup = new OptimizedModelWrapper.MaterialGroupWrapper(renderStage.shaderType, texture);
 			modelParts.forEach(modelPart -> materialGroup.addCube(modelPart, 0, 0, 0, false, MAX_LIGHT_INTERIOR));
-			optimizedModelDoor = new OptimizedModelWrapper(ObjectArrayList.of(materialGroup));
+			optimizedModelDoor = OptimizedModelWrapper.fromMaterialGroups(ObjectArrayList.of(materialGroup));
 		} else {
 			optimizedModelDoor = null;
 		}
@@ -106,8 +117,42 @@ public final class ModelPropertiesPart extends ModelPropertiesPartSchema impleme
 		}));
 	}
 
-	public void render(Identifier texture, StoredMatrixTransformations storedMatrixTransformations, VehicleExtension vehicle, int light, ObjectArrayList<Box> openDoorways) {
-		if (VehicleResource.matchesCondition(vehicle, condition, openDoorways.isEmpty())) {
+	public void writeCache(
+			Map<String, OptimizedModel.ObjModel> nameToObjModels,
+			PositionDefinitions positionDefinitionsObject,
+			Object2ObjectOpenHashMap<PartCondition, Object2ObjectOpenHashMap<RenderStage, ObjectArrayList<OptimizedModelWrapper.ObjModelWrapper>>> objModelsForPartConditionAndRenderStage,
+			Object2ObjectOpenHashMap<PartCondition, Object2ObjectOpenHashMap<RenderStage, ObjectArrayList<OptimizedModelWrapper.ObjModelWrapper>>> objModelsForPartConditionAndRenderStageDoorsClosed,
+			double modelYOffset
+	) {
+		final ObjectArrayList<OptimizedModelWrapper.ObjModelWrapper> objModels = new ObjectArrayList<>();
+		final MutableBox mutableBox = new MutableBox();
+		final Supplier<OptimizedModelWrapper> optimizedModelDoor;
+
+		names.forEach(name -> {
+			final OptimizedModel.ObjModel objModel = nameToObjModels.get(name);
+			if (objModel != null) {
+				objModels.add(new OptimizedModelWrapper.ObjModelWrapper(objModel));
+				mutableBox.add(new Box(-objModel.getMinX(), -objModel.getMinY(), -objModel.getMinZ(), -objModel.getMaxX(), -objModel.getMaxY(), -objModel.getMaxZ()));
+			}
+		});
+
+		optimizedModelDoor = () -> isDoor() ? OptimizedModelWrapper.fromObjModels(objModels) : null;
+
+		positionDefinitions.forEach(positionDefinitionName -> positionDefinitionsObject.getPositionDefinition(positionDefinitionName, (positions, positionsFlipped) -> {
+			if (type == PartType.NORMAL) {
+				iteratePositions(positions, positionsFlipped, (x, y, z, flipped) -> {
+					if (!isDoor()) {
+						addObjModelPosition(objModels, objModelsForPartConditionAndRenderStage, x, y, z, flipped, modelYOffset);
+					}
+					addObjModelPosition(objModels, objModelsForPartConditionAndRenderStageDoorsClosed, x, y, z, flipped, modelYOffset);
+					partDetailsList.add(new PartDetails(new ObjectArrayList<>(), optimizedModelDoor.get(), addBox(mutableBox.get(), x, y, z, flipped), x, y, z, flipped));
+				});
+			}
+		}));
+	}
+
+	public void render(Identifier texture, StoredMatrixTransformations storedMatrixTransformations, @Nullable VehicleExtension vehicle, int light, ObjectArrayList<Box> openDoorways) {
+		if (vehicle == null || VehicleResource.matchesCondition(vehicle, condition, openDoorways.isEmpty())) {
 			switch (type) {
 				case NORMAL:
 					final ObjectIntImmutablePair<RenderTrains.QueuedRenderLayer> renderProperties = getRenderProperties(renderStage, light, vehicle);
@@ -118,13 +163,32 @@ public final class ModelPropertiesPart extends ModelPropertiesPartSchema impleme
 					}
 					break;
 				case DISPLAY:
-					if (displayOptions.contains(DisplayOption.SEVEN_SEGMENT.toString())) {
-						RenderTrains.scheduleRender(new Identifier(Init.MOD_ID, "textures/block/sign/seven_segment.png"), true, RenderTrains.QueuedRenderLayer.LIGHT_TRANSLUCENT, (graphicsHolder, offset) -> renderDisplay(graphicsHolder, offset, storedMatrixTransformations, vehicle, true));
-					} else {
-						RenderTrains.scheduleRender(RenderTrains.QueuedRenderLayer.TEXT, (graphicsHolder, offset) -> renderDisplay(graphicsHolder, offset, storedMatrixTransformations, vehicle, false));
+					if (vehicle != null) {
+						if (displayOptions.contains(DisplayOption.SEVEN_SEGMENT.toString())) {
+							RenderTrains.scheduleRender(new Identifier(Init.MOD_ID, "textures/block/sign/seven_segment.png"), true, RenderTrains.QueuedRenderLayer.LIGHT_TRANSLUCENT, (graphicsHolder, offset) -> renderDisplay(graphicsHolder, offset, storedMatrixTransformations, vehicle, true));
+						} else {
+							RenderTrains.scheduleRender(RenderTrains.QueuedRenderLayer.TEXT, (graphicsHolder, offset) -> renderDisplay(graphicsHolder, offset, storedMatrixTransformations, vehicle, false));
+						}
 					}
 					break;
 			}
+		}
+	}
+
+	public void getOpenDoorBounds(ObjectArrayList<Box> boxes, double time) {
+		if (isDoor()) {
+			partDetailsList.forEach(partDetails -> {
+				final double x = doorAnimationType.getDoorAnimationX(doorXMultiplier, partDetails.flipped, time) / 16;
+				final double z = doorAnimationType.getDoorAnimationZ(doorZMultiplier, partDetails.flipped, time, true) / 16;
+				boxes.add(new Box(
+						partDetails.box.getMinXMapped() + x,
+						partDetails.box.getMinYMapped(),
+						partDetails.box.getMinZMapped() + z,
+						partDetails.box.getMaxXMapped() + x,
+						partDetails.box.getMaxYMapped(),
+						partDetails.box.getMaxZMapped() + z
+				));
+			});
 		}
 	}
 
@@ -156,13 +220,13 @@ public final class ModelPropertiesPart extends ModelPropertiesPartSchema impleme
 		return doorXMultiplier != 0 || doorZMultiplier != 0;
 	}
 
-	private void renderNormal(StoredMatrixTransformations storedMatrixTransformations, VehicleExtension vehicle, ObjectIntImmutablePair<RenderTrains.QueuedRenderLayer> renderProperties, ObjectArrayList<Box> openDoorways, int light, GraphicsHolder graphicsHolder, Vector3d offset) {
+	private void renderNormal(StoredMatrixTransformations storedMatrixTransformations, @Nullable VehicleExtension vehicle, ObjectIntImmutablePair<RenderTrains.QueuedRenderLayer> renderProperties, ObjectArrayList<Box> openDoorways, int light, GraphicsHolder graphicsHolder, Vector3d offset) {
 		storedMatrixTransformations.transform(graphicsHolder, offset);
 		partDetailsList.forEach(partDetails -> {
 			final boolean canOpenDoors = openDoorways.contains(partDetails.doorway);
-			final float x = (float) (partDetails.x + doorAnimationType.getDoorAnimationX(doorXMultiplier, canOpenDoors ? vehicle.persistentVehicleData.getDoorValue() : 0));
+			final float x = (float) (partDetails.x + (vehicle == null ? 0 : doorAnimationType.getDoorAnimationX(doorXMultiplier, partDetails.flipped, canOpenDoors ? vehicle.persistentVehicleData.getDoorValue() : 0)));
 			final float y = (float) partDetails.y;
-			final float z = (float) (partDetails.z + doorAnimationType.getDoorAnimationZ(doorZMultiplier, canOpenDoors ? vehicle.persistentVehicleData.getDoorValue() : 0, vehicle.vehicleExtraData.getDoorMultiplier() > 0));
+			final float z = (float) (partDetails.z + (vehicle == null ? 0 : doorAnimationType.getDoorAnimationZ(doorZMultiplier, partDetails.flipped, canOpenDoors ? vehicle.persistentVehicleData.getDoorValue() : 0, vehicle.vehicleExtraData.getDoorMultiplier() > 0)));
 
 			if (RenderVehicles.useOptimizedRendering()) {
 				// If doors are open, only render the optimized door parts
@@ -236,8 +300,21 @@ public final class ModelPropertiesPart extends ModelPropertiesPartSchema impleme
 	private void addCube(Identifier texture, ObjectArrayList<ModelPartExtension> modelParts, Object2ObjectOpenHashMap<PartCondition, Object2ObjectOpenHashMap<RenderStage, OptimizedModelWrapper.MaterialGroupWrapper>> materialGroupsForPartConditionAndRenderStage, double x, double y, double z, boolean flipped) {
 		modelParts.forEach(modelPart -> Data.put(materialGroupsForPartConditionAndRenderStage, condition, renderStage, oldValue -> {
 			final OptimizedModelWrapper.MaterialGroupWrapper materialGroup = oldValue == null ? new OptimizedModelWrapper.MaterialGroupWrapper(renderStage.shaderType, texture) : oldValue;
-			materialGroup.addCube(modelPart, (x + doorAnimationType.getDoorAnimationX(doorXMultiplier, 0)) / 16, y / 16, (z + doorAnimationType.getDoorAnimationZ(doorZMultiplier, 0, false)) / 16, flipped, MAX_LIGHT_INTERIOR);
+			materialGroup.addCube(modelPart, (x + doorAnimationType.getDoorAnimationX(doorXMultiplier, flipped, 0)) / 16, y / 16, (z + doorAnimationType.getDoorAnimationZ(doorZMultiplier, flipped, 0, false)) / 16, flipped, MAX_LIGHT_INTERIOR);
 			return materialGroup;
+		}, Object2ObjectOpenHashMap::new));
+	}
+
+	private void addObjModelPosition(
+			ObjectArrayList<OptimizedModelWrapper.ObjModelWrapper> objModels,
+			Object2ObjectOpenHashMap<PartCondition, Object2ObjectOpenHashMap<RenderStage, ObjectArrayList<OptimizedModelWrapper.ObjModelWrapper>>> objModelsForPartConditionAndRenderStage,
+			double x, double y, double z, boolean flipped, double modelYOffset
+	) {
+		objModels.forEach(objModel -> Data.put(objModelsForPartConditionAndRenderStage, condition, renderStage, oldValue -> {
+			final ObjectArrayList<OptimizedModelWrapper.ObjModelWrapper> newObjModels = oldValue == null ? new ObjectArrayList<>() : oldValue;
+			objModel.addTransformation(renderStage.shaderType, (x + doorAnimationType.getDoorAnimationX(doorXMultiplier, flipped, 0)) / 16, y / 16 - modelYOffset, (z + doorAnimationType.getDoorAnimationZ(doorZMultiplier, flipped, 0, false)) / 16, flipped);
+			newObjModels.add(objModel);
+			return newObjModels;
 		}, Object2ObjectOpenHashMap::new));
 	}
 
@@ -295,10 +372,10 @@ public final class ModelPropertiesPart extends ModelPropertiesPartSchema impleme
 		}
 	}
 
-	private static ObjectIntImmutablePair<RenderTrains.QueuedRenderLayer> getRenderProperties(RenderStage renderStage, int light, VehicleExtension vehicle) {
+	private static ObjectIntImmutablePair<RenderTrains.QueuedRenderLayer> getRenderProperties(RenderStage renderStage, int light, @Nullable VehicleExtension vehicle) {
 		if (renderStage == RenderStage.ALWAYS_ON_LIGHT) {
 			return new ObjectIntImmutablePair<>(RenderTrains.QueuedRenderLayer.LIGHT_TRANSLUCENT, GraphicsHolder.getDefaultLight());
-		} else {
+		} else if (vehicle != null) {
 			if (vehicle.getIsOnRoute()) {
 				switch (renderStage) {
 					case LIGHT:
@@ -327,7 +404,7 @@ public final class ModelPropertiesPart extends ModelPropertiesPartSchema impleme
 
 	private static void iteratePositions(ObjectArrayList<PartPosition> positions, ObjectArrayList<PartPosition> positionsFlipped, PositionCallback positionCallback) {
 		positions.forEach(position -> positionCallback.accept(position.getX(), position.getY(), position.getZ(), false));
-		positionsFlipped.forEach(position -> positionCallback.accept(position.getX(), position.getY(), position.getZ(), true));
+		positionsFlipped.forEach(position -> positionCallback.accept(-position.getX(), position.getY(), position.getZ(), true));
 	}
 
 	private static double getClosestDistance(double a1, double a2, double b1, double b2) {

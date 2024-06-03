@@ -14,7 +14,7 @@ public final class Items {
 
 	static {
 		// Brush and dashboards
-		BRUSH = Init.REGISTRY.registerItem(new Identifier(Init.MOD_ID, "brush"), itemSettings -> new Item(new ItemExtension(itemSettings.maxCount(1))), CreativeModeTabs.CORE);
+		BRUSH = Init.REGISTRY.registerItem(new Identifier(Init.MOD_ID, "brush"), itemSettings -> new Item(new ItemBrush(itemSettings)), CreativeModeTabs.CORE);
 		RAILWAY_DASHBOARD = Init.REGISTRY.registerItem(new Identifier(Init.MOD_ID, "dashboard"), itemSettings -> new Item(new ItemDashboard(TransportMode.TRAIN, itemSettings)), CreativeModeTabs.CORE);
 		BOAT_DASHBOARD = Init.REGISTRY.registerItem(new Identifier(Init.MOD_ID, "dashboard_2"), itemSettings -> new Item(new ItemDashboard(TransportMode.BOAT, itemSettings)), CreativeModeTabs.CORE);
 		CABLE_CAR_DASHBOARD = Init.REGISTRY.registerItem(new Identifier(Init.MOD_ID, "dashboard_3"), itemSettings -> new Item(new ItemDashboard(TransportMode.CABLE_CAR, itemSettings)), CreativeModeTabs.CORE);
@@ -65,7 +65,6 @@ public final class Items {
 		RAIL_CONNECTOR_TURN_BACK = Init.REGISTRY.registerItem(new Identifier(Init.MOD_ID, "rail_connector_turn_back"), itemSettings -> new Item(new ItemRailModifier(true, false, true, false, RailType.TURN_BACK, itemSettings)), CreativeModeTabs.CORE);
 		RAIL_CONNECTOR_CABLE_CAR = Init.REGISTRY.registerItem(new Identifier(Init.MOD_ID, "rail_connector_cable_car"), itemSettings -> new Item(new ItemRailModifier(false, true, false, true, RailType.CABLE_CAR, itemSettings)), CreativeModeTabs.CORE);
 		RAIL_CONNECTOR_RUNWAY = Init.REGISTRY.registerItem(new Identifier(Init.MOD_ID, "rail_connector_runway"), itemSettings -> new Item(new ItemRailModifier(false, false, true, true, RailType.RUNWAY, itemSettings)), CreativeModeTabs.CORE);
-		RAIL_SHAPE_MODIFIER = Init.REGISTRY.registerItem(new Identifier(Init.MOD_ID, "rail_shape_modifier"), itemSettings -> new Item(new ItemRailShapeModifier(itemSettings)), CreativeModeTabs.CORE);
 		RAIL_REMOVER = Init.REGISTRY.registerItem(new Identifier(Init.MOD_ID, "rail_remover"), itemSettings -> new Item(new ItemRailModifier(itemSettings)), CreativeModeTabs.CORE);
 
 		// Signal connectors
@@ -182,7 +181,6 @@ public final class Items {
 	public static final ItemRegistryObject RAIL_CONNECTOR_SIDING;
 	public static final ItemRegistryObject RAIL_CONNECTOR_TURN_BACK;
 	public static final ItemRegistryObject RAIL_REMOVER;
-	public static final ItemRegistryObject RAIL_SHAPE_MODIFIER;
 	public static final ItemRegistryObject RAILWAY_DASHBOARD;
 	public static final ItemRegistryObject SIGNAL_CONNECTOR_BLACK;
 	public static final ItemRegistryObject SIGNAL_CONNECTOR_BLUE;

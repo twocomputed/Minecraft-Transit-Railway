@@ -19,11 +19,12 @@ import org.mtr.mapping.mapper.GameRule;
 import org.mtr.mapping.mapper.MinecraftServerHelper;
 import org.mtr.mapping.mapper.WorldHelper;
 import org.mtr.mapping.registry.CommandBuilder;
-import org.mtr.mapping.registry.EventRegistry;
 import org.mtr.mapping.registry.Registry;
 import org.mtr.mapping.tool.DummyClass;
+import org.mtr.mod.data.ArrivalsCacheServer;
 import org.mtr.mod.data.RailActionModule;
 import org.mtr.mod.packet.*;
+import org.mtr.mod.servlet.Tunnel;
 import org.mtr.mod.servlet.VehicleLiftServlet;
 
 import javax.annotation.Nullable;
@@ -38,8 +39,10 @@ public final class Init implements Utilities {
 
 	private static Main main;
 	private static Webserver webserver;
+	private static Tunnel tunnel;
 	private static int serverPort;
 	private static Runnable sendWorldTimeUpdate;
+	private static boolean canSendWorldTimeUpdate = true;
 	private static int serverTick;
 
 	public static final String MOD_ID = "mtr";
@@ -71,6 +74,7 @@ public final class Init implements Utilities {
 		REGISTRY.registerPacket(PacketDepotGenerate.class, PacketDepotGenerate::new);
 		REGISTRY.registerPacket(PacketDriveTrain.class, PacketDriveTrain::new);
 		REGISTRY.registerPacket(PacketFetchArrivals.class, PacketFetchArrivals::new);
+		REGISTRY.registerPacket(PacketForwardClientRequest.class, PacketForwardClientRequest::new);
 		REGISTRY.registerPacket(PacketOpenBlockEntityScreen.class, PacketOpenBlockEntityScreen::new);
 		REGISTRY.registerPacket(PacketOpenDashboardScreen.class, PacketOpenDashboardScreen::new);
 		REGISTRY.registerPacket(PacketOpenLiftCustomizationScreen.class, PacketOpenLiftCustomizationScreen::new);
@@ -78,10 +82,14 @@ public final class Init implements Utilities {
 		REGISTRY.registerPacket(PacketOpenTicketMachineScreen.class, PacketOpenTicketMachineScreen::new);
 		REGISTRY.registerPacket(PacketPressLiftButton.class, PacketPressLiftButton::new);
 		REGISTRY.registerPacket(PacketRequestData.class, PacketRequestData::new);
+		REGISTRY.registerPacket(PacketTurnOnBlockEntity.class, PacketTurnOnBlockEntity::new);
 		REGISTRY.registerPacket(PacketUpdateData.class, PacketUpdateData::new);
+		REGISTRY.registerPacket(PacketUpdateLastRailStyles.class, PacketUpdateLastRailStyles::new);
 		REGISTRY.registerPacket(PacketUpdateLiftTrackFloorConfig.class, PacketUpdateLiftTrackFloorConfig::new);
 		REGISTRY.registerPacket(PacketUpdatePIDSConfig.class, PacketUpdatePIDSConfig::new);
 		REGISTRY.registerPacket(PacketUpdateRailwaySignConfig.class, PacketUpdateRailwaySignConfig::new);
+		REGISTRY.registerPacket(PacketUpdateTrainAnnouncerConfig.class, PacketUpdateTrainAnnouncerConfig::new);
+		REGISTRY.registerPacket(PacketUpdateTrainScheduleSensorConfig.class, PacketUpdateTrainScheduleSensorConfig::new);
 		REGISTRY.registerPacket(PacketUpdateTrainSensorConfig.class, PacketUpdateTrainSensorConfig::new);
 		REGISTRY.registerPacket(PacketUpdateVehiclesLifts.class, PacketUpdateVehiclesLifts::new);
 		REGISTRY.registerPacket(PacketUpdateVehicleRidingEntities.class, PacketUpdateVehicleRidingEntities::new);
@@ -136,7 +144,7 @@ public final class Init implements Utilities {
 		}, "minecrafttransitrailway");
 
 		// Register events
-		EventRegistry.registerServerStarted(minecraftServer -> {
+		REGISTRY.eventRegistry.registerServerStarted(minecraftServer -> {
 			// Start up the backend
 			RAIL_ACTION_MODULES.clear();
 			WORLD_ID_LIST.clear();
@@ -147,6 +155,9 @@ public final class Init implements Utilities {
 
 			final int defaultPort = getDefaultPortFromConfig(minecraftServer);
 			serverPort = findFreePort(defaultPort);
+			tunnel = new Tunnel(minecraftServer.getRunDirectory(), defaultPort, () -> {
+			});
+
 			final int port = findFreePort(serverPort + 1);
 			main = new Main(minecraftServer.getSavePath(WorldSavePath.getRootMapped()).resolve("mtr"), serverPort, port, WORLD_ID_LIST.toArray(new String[0]));
 			webserver = new Webserver(port);
@@ -154,19 +165,37 @@ public final class Init implements Utilities {
 			webserver.start();
 
 			serverTick = 0;
-			sendWorldTimeUpdate = () -> sendHttpRequest(
-					"operation/set-time",
-					null,
-					Utilities.getJsonObjectFromData(new SetTime(
-							(WorldHelper.getTimeOfDay(minecraftServer.getOverworld()) + 6000) * SECONDS_PER_MC_HOUR,
-							MILLIS_PER_MC_DAY,
-							GameRule.DO_DAYLIGHT_CYCLE.getBooleanGameRule(minecraftServer)
-					)).toString(),
-					null
-			);
+			sendWorldTimeUpdate = () -> {
+				if (canSendWorldTimeUpdate) {
+					canSendWorldTimeUpdate = false;
+					sendHttpRequest(
+							"operation/set-time",
+							null,
+							Utilities.getJsonObjectFromData(new SetTime(
+									(WorldHelper.getTimeOfDay(minecraftServer.getOverworld()) + 6000) * SECONDS_PER_MC_HOUR,
+									MILLIS_PER_MC_DAY,
+									GameRule.DO_DAYLIGHT_CYCLE.getBooleanGameRule(minecraftServer)
+							)).toString(),
+							response -> canSendWorldTimeUpdate = true
+					);
+				} else {
+					Main.LOGGER.error("Transport Simulation Core not responding; stopping Minecraft server!");
+					if (main != null) {
+						main.stop();
+					}
+					if (webserver != null) {
+						webserver.stop();
+					}
+					Main.LOGGER.error("Shutting down all threads");
+					System.exit(0);
+				}
+			};
 		});
 
-		EventRegistry.registerServerStopping(minecraftServer -> {
+		REGISTRY.eventRegistry.registerServerStopping(minecraftServer -> {
+			if (tunnel != null) {
+				tunnel.stop();
+			}
 			if (main != null) {
 				main.stop();
 			}
@@ -175,14 +204,15 @@ public final class Init implements Utilities {
 			}
 		});
 
-		EventRegistry.registerStartServerTick(() -> {
+		REGISTRY.eventRegistry.registerStartServerTick(() -> {
 			if (sendWorldTimeUpdate != null && serverTick % (SECONDS_PER_MC_HOUR * 10) == 0) {
 				sendWorldTimeUpdate.run();
 			}
+			ArrivalsCacheServer.tickAll();
 			serverTick++;
 		});
 
-		EventRegistry.registerEndWorldTick(serverWorld -> {
+		REGISTRY.eventRegistry.registerEndWorldTick(serverWorld -> {
 			final RailActionModule railActionModule = RAIL_ACTION_MODULES.get(serverWorld);
 			if (railActionModule != null) {
 				railActionModule.tick();
@@ -200,13 +230,12 @@ public final class Init implements Utilities {
 		}
 	}
 
+	public static void sendHttpRequest(String endpoint, @Nullable String content, @Nullable Consumer<String> consumer) {
+		Simulator.REQUEST_HELPER.sendRequest(String.format("http://localhost:%s%s", serverPort, endpoint), content, consumer);
+	}
+
 	public static void sendHttpRequest(String endpoint, @Nullable World world, String content, @Nullable Consumer<String> consumer) {
-		Simulator.REQUEST_HELPER.sendPostRequest(String.format(
-				"http://localhost:%s/mtr/api/%s?%s",
-				serverPort,
-				endpoint,
-				world == null ? "dimensions=all" : "dimension=" + WORLD_ID_LIST.indexOf(getWorldId(world))
-		), content, consumer);
+		sendHttpRequest(String.format("/mtr/api/%s?%s", endpoint, world == null ? "dimensions=all" : "dimension=" + WORLD_ID_LIST.indexOf(getWorldId(world))), content, consumer);
 	}
 
 	public static BlockPos positionToBlockPos(Position position) {
@@ -225,6 +254,28 @@ public final class Init implements Utilities {
 		return chunkManager.getWorldChunk(blockPos.getX() / 16, blockPos.getZ() / 16) != null && world.isRegionLoaded(blockPos, blockPos);
 	}
 
+	public static String getWorldId(World world) {
+		final Identifier identifier = MinecraftServerHelper.getWorldId(world);
+		return String.format("%s/%s", identifier.getNamespace(), identifier.getPath());
+	}
+
+	public static String getTunnelUrl() {
+		return tunnel.getTunnelUrl();
+	}
+
+	public static int findFreePort(int startingPort) {
+		for (int i = Math.max(1024, startingPort); i <= 65535; i++) {
+			// Start with port 80, then search from 1025 onwards
+			try (final ServerSocket serverSocket = new ServerSocket(i == 1024 ? 80 : i)) {
+				final int port = serverSocket.getLocalPort();
+				LOGGER.info("Found available port: {}", port);
+				return port;
+			} catch (Exception ignored) {
+			}
+		}
+		return 0;
+	}
+
 	private static int getDefaultPortFromConfig(MinecraftServer minecraftServer) {
 		final Path filePath = minecraftServer.getRunDirectory().toPath().resolve("config/mtr_webserver_port.txt");
 		final int defaultPort = 8888;
@@ -240,23 +291,6 @@ public final class Init implements Utilities {
 		}
 
 		return defaultPort;
-	}
-
-	private static int findFreePort(int startingPort) {
-		for (int i = Math.max(1025, startingPort); i <= 65535; i++) {
-			try (final ServerSocket serverSocket = new ServerSocket(i)) {
-				final int port = serverSocket.getLocalPort();
-				LOGGER.info("Found available port: " + port);
-				return port;
-			} catch (Exception ignored) {
-			}
-		}
-		return 0;
-	}
-
-	private static String getWorldId(World world) {
-		final Identifier identifier = MinecraftServerHelper.getWorldId(world);
-		return String.format("%s/%s", identifier.getNamespace(), identifier.getPath());
 	}
 
 	private static void generateOrClearDepotsFromCommand(CommandBuilder<?> commandBuilder, boolean isGenerate) {

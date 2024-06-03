@@ -4,11 +4,12 @@ import org.mtr.core.data.Platform;
 import org.mtr.core.data.Position;
 import org.mtr.core.data.Station;
 import org.mtr.core.operation.DataRequest;
+import org.mtr.core.servlet.Webserver;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import org.mtr.libraries.org.eclipse.jetty.servlet.ServletHolder;
 import org.mtr.mapping.holder.*;
 import org.mtr.mapping.mapper.MinecraftClientHelper;
 import org.mtr.mapping.mapper.TextHelper;
-import org.mtr.mapping.registry.EventRegistryClient;
 import org.mtr.mapping.registry.RegistryClient;
 import org.mtr.mod.block.BlockTactileMap;
 import org.mtr.mod.client.*;
@@ -17,6 +18,8 @@ import org.mtr.mod.entity.EntityRendering;
 import org.mtr.mod.item.ItemBlockClickingBase;
 import org.mtr.mod.packet.PacketRequestData;
 import org.mtr.mod.render.*;
+import org.mtr.mod.servlet.ClientServlet;
+import org.mtr.mod.servlet.Tunnel;
 import org.mtr.mod.sound.LoopingSoundInstance;
 
 import javax.annotation.Nullable;
@@ -25,6 +28,8 @@ import java.util.function.Consumer;
 
 public final class InitClient {
 
+	private static Webserver webserver;
+	private static Tunnel tunnel;
 	private static long lastMillis = 0;
 	private static long gameMillis = 0;
 	private static long lastPlayedTrainSoundsMillis = 0;
@@ -106,7 +111,6 @@ public final class InitClient {
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.ARRIVAL_PROJECTOR_1_SMALL, dispatcher -> new RenderPIDS<>(dispatcher, 1, 15, 16, 14, 14, false, 1));
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.ARRIVAL_PROJECTOR_1_MEDIUM, dispatcher -> new RenderPIDS<>(dispatcher, -15, 15, 16, 30, 46, false, 1));
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.ARRIVAL_PROJECTOR_1_LARGE, dispatcher -> new RenderPIDS<>(dispatcher, -15, 15, 16, 46, 46, false, 1));
-		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.BOAT_NODE, RenderBoatNode::new);
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.CLOCK, RenderClock::new);
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.PSD_DOOR_1, dispatcher -> new RenderPSDAPGDoor<>(dispatcher, 0));
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.PSD_DOOR_2, dispatcher -> new RenderPSDAPGDoor<>(dispatcher, 1));
@@ -315,44 +319,62 @@ public final class InitClient {
 
 		REGISTRY_CLIENT.setupPackets(new Identifier(Init.MOD_ID, "packet"));
 
-		EventRegistryClient.registerClientJoin(() -> {
+		REGISTRY_CLIENT.eventRegistryClient.registerClientJoin(() -> {
 			MinecraftClientData.reset();
 			DynamicTextureCache.instance = new DynamicTextureCache();
 			lastMillis = System.currentTimeMillis();
 			gameMillis = 0;
 			DynamicTextureCache.instance.reload();
+
+			// Clientside webserver for locally hosting the online system map
+			final int port = Init.findFreePort(0);
+			webserver = new Webserver(port);
+			webserver.addServlet(new ServletHolder(new ClientServlet()), "/");
+			webserver.start();
+			tunnel = new Tunnel(MinecraftClient.getInstance().getRunDirectoryMapped(), port, () -> QrCodeHelper.INSTANCE.setClientTunnelUrl(port, tunnel.getTunnelUrl()));
 		});
 
-		EventRegistryClient.registerStartClientTick(() -> {
+		REGISTRY_CLIENT.eventRegistryClient.registerClientDisconnect(() -> {
+			if (tunnel != null) {
+				tunnel.stop();
+			}
+			if (webserver != null) {
+				webserver.stop();
+			}
+		});
+
+		REGISTRY_CLIENT.eventRegistryClient.registerStartClientTick(() -> {
 			incrementGameMillis();
 			final ClientPlayerEntity clientPlayerEntity = MinecraftClient.getInstance().getPlayerMapped();
+			final Entity cameraEntity = MinecraftClient.getInstance().getCameraEntity();
 
 			// If player is moving, send a request every 0.5 seconds to the server to fetch any new nearby data
-			if (clientPlayerEntity != null && lastUpdatePacketMillis >= 0 && getGameMillis() - lastUpdatePacketMillis > 500) {
-				final DataRequest dataRequest = new DataRequest(clientPlayerEntity.getUuidAsString(), Init.blockPosToPosition(clientPlayerEntity.getBlockPos()), MinecraftClientHelper.getRenderDistance() * 16L);
+			if (clientPlayerEntity != null && cameraEntity != null && lastUpdatePacketMillis >= 0 && getGameMillis() - lastUpdatePacketMillis > 500) {
+				final DataRequest dataRequest = new DataRequest(clientPlayerEntity.getUuidAsString(), Init.blockPosToPosition(cameraEntity.getBlockPos()), MinecraftClientHelper.getRenderDistance() * 16L);
 				dataRequest.writeExistingIds(MinecraftClientData.getInstance());
 				InitClient.REGISTRY_CLIENT.sendPacketToServer(new PacketRequestData(dataRequest));
 				lastUpdatePacketMillis = -1;
 			}
 		});
 
-		EventRegistryClient.registerEndClientTick(() -> {
+		REGISTRY_CLIENT.eventRegistryClient.registerEndClientTick(() -> {
 			if (movePlayer != null) {
 				movePlayer.run();
 				movePlayer = null;
 			}
 		});
 
-		EventRegistryClient.registerChunkLoad((clientWorld, worldChunk) -> {
+		REGISTRY_CLIENT.eventRegistryClient.registerChunkLoad((clientWorld, worldChunk) -> {
 			if (lastUpdatePacketMillis < 0) {
 				lastUpdatePacketMillis = getGameMillis();
 			}
 		});
 
-		EventRegistryClient.registerResourceReloadEvent(CustomResourceLoader::reload);
+		REGISTRY_CLIENT.eventRegistryClient.registerResourceReloadEvent(CustomResourceLoader::reload);
 
 		Patreon.getPatreonList(Config.PATREON_LIST);
 		Config.refreshProperties();
+		ResourcePackHelper.fix();
 
 		BlockTactileMap.BlockEntity.updateSoundSource = TACTILE_MAP_SOUND_INSTANCE::setPos;
 		BlockTactileMap.BlockEntity.onUse = blockPos -> {

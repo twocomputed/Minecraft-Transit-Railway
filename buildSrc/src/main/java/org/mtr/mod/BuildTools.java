@@ -128,6 +128,9 @@ public class BuildTools {
 							} else if (replacementObject.toString().contains("a320")) {
 								vehicleObject.addProperty("bogie1Position", -14.25);
 								vehicleObject.addProperty("bogie2Position", -2);
+							} else if (replacementObject.toString().contains("br_423")) {
+								vehicleObject.addProperty("bogie1Position", -6);
+								vehicleObject.addProperty("bogie2Position", 6);
 							} else if (length <= 4 || length <= 14 && id.contains("cab_3")) {
 								vehicleObject.addProperty("bogie1Position", 0);
 								vehicleObject.addProperty("bogie2Position", 0);
@@ -159,7 +162,7 @@ public class BuildTools {
 	public void copyBuildFile() throws IOException {
 		final Path directory = path.getParent().resolve("build/release");
 		Files.createDirectories(directory);
-		Files.copy(path.resolve(String.format("build/libs/%s-%s%s.jar", loader, version, loader.equals("fabric") ? "" : "-all")), directory.resolve(String.format("MTR-%s-%s-%s.jar", loader, minecraftVersion, version)), StandardCopyOption.REPLACE_EXISTING);
+		Files.copy(path.resolve(String.format("build/libs/%s-%s%s.jar", loader, version, loader.equals("fabric") ? "" : "-all")), directory.resolve(String.format("MTR-%s-%s+%s.jar", loader, version, minecraftVersion)), StandardCopyOption.REPLACE_EXISTING);
 	}
 
 	private static JsonElement getJson(String url) {

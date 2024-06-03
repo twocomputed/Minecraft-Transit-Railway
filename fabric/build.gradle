@@ -11,6 +11,7 @@ final BuildTools buildTools = new BuildTools(minecraftVersion, "fabric", project
 loom {
 	accessWidenerPath = file("src/main/resources/mtr.accesswidener")
 	runConfigs.configureEach { ideConfigGenerated = true }
+	mixin { setDefaultRefmapName("mtr.refmap.json") }
 }
 
 dependencies {
@@ -39,7 +40,7 @@ tasks.register("setupFiles") {
 		outputs.upToDateWhen { false }
 		from "src/main/KeysTemplate.java"
 		into "src/main/java/org/mtr/mod"
-		filter(ReplaceTokens, tokens: ["key": patreonApiKey, "version": minecraftVersion + "-" + version, "server": testServer, "debug": debug])
+		filter(ReplaceTokens, tokens: ["key": patreonApiKey, "version": version + "+" + minecraftVersion, "server": testServer, "debug": debug])
 		rename "(.+)Template.java", "\$1.java"
 	}
 
@@ -47,7 +48,7 @@ tasks.register("setupFiles") {
 		outputs.upToDateWhen { false }
 		from "src/main/fabric.mod.template.json"
 		into "src/main/resources"
-		filter(ReplaceTokens, tokens: ["minecraft": minecraftVersion, "version": minecraftVersion + "-" + version])
+		filter(ReplaceTokens, tokens: ["minecraft": minecraftVersion, "version": version])
 		rename "(.+).template.json", "\$1.json"
 	}
 

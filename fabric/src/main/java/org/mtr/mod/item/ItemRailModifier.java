@@ -5,6 +5,7 @@ import org.mtr.core.data.Rail;
 import org.mtr.core.data.TransportMode;
 import org.mtr.core.data.TwoPositionsBase;
 import org.mtr.core.tool.Angle;
+import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import org.mtr.mapping.holder.*;
 import org.mtr.mapping.mapper.TextHelper;
 import org.mtr.mod.Init;
@@ -12,9 +13,11 @@ import org.mtr.mod.block.BlockNode;
 import org.mtr.mod.data.RailType;
 import org.mtr.mod.packet.PacketDeleteData;
 import org.mtr.mod.packet.PacketUpdateData;
+import org.mtr.mod.packet.PacketUpdateLastRailStyles;
 
 import javax.annotation.Nullable;
 import java.util.List;
+import java.util.UUID;
 
 public class ItemRailModifier extends ItemNodeModifierBase {
 
@@ -44,7 +47,7 @@ public class ItemRailModifier extends ItemNodeModifierBase {
 	@Override
 	protected void onConnect(World world, ItemStack stack, TransportMode transportMode, BlockState stateStart, BlockState stateEnd, BlockPos posStart, BlockPos posEnd, Angle facingStart, Angle facingEnd, @Nullable ServerPlayerEntity player) {
 		if (railType != null) {
-			final Rail rail = createRail(transportMode, stateStart, stateEnd, posStart, posEnd, facingStart, facingEnd);
+			final Rail rail = createRail(player == null ? null : player.getUuid(), transportMode, stateStart, stateEnd, posStart, posEnd, facingStart, facingEnd);
 			if (rail != null) {
 				world.setBlockState(posStart, stateStart.with(new Property<>(BlockNode.IS_CONNECTED.data), true));
 				world.setBlockState(posEnd, stateEnd.with(new Property<>(BlockNode.IS_CONNECTED.data), true));
@@ -61,8 +64,8 @@ public class ItemRailModifier extends ItemNodeModifierBase {
 	}
 
 	@Nullable
-	public Rail createRail(TransportMode transportMode, BlockState stateStart, BlockState stateEnd, BlockPos posStart, BlockPos posEnd, Angle facingStart, Angle facingEnd) {
-		if (railType != null) {
+	public Rail createRail(@Nullable UUID uuid, TransportMode transportMode, BlockState stateStart, BlockState stateEnd, BlockPos posStart, BlockPos posEnd, Angle facingStart, Angle facingEnd) {
+		if (railType != null && uuid != null) {
 			final boolean isValidContinuousMovement;
 			final RailType newRailType;
 
@@ -94,20 +97,20 @@ public class ItemRailModifier extends ItemNodeModifierBase {
 
 			switch (newRailType) {
 				case PLATFORM:
-					rail = Rail.newPlatformRail(positionStart, facingStart, positionEnd, facingEnd, Rail.Shape.QUADRATIC, 0, "", transportMode);
+					rail = Rail.newPlatformRail(positionStart, facingStart, positionEnd, facingEnd, Rail.Shape.QUADRATIC, 0, new ObjectArrayList<>(), transportMode);
 					break;
 				case SIDING:
-					rail = Rail.newSidingRail(positionStart, facingStart, positionEnd, facingEnd, Rail.Shape.QUADRATIC, 0, "", transportMode);
+					rail = Rail.newSidingRail(positionStart, facingStart, positionEnd, facingEnd, Rail.Shape.QUADRATIC, 0, new ObjectArrayList<>(), transportMode);
 					break;
 				case TURN_BACK:
-					rail = Rail.newTurnBackRail(positionStart, facingStart, positionEnd, facingEnd, Rail.Shape.QUADRATIC, 0, "", transportMode);
+					rail = Rail.newTurnBackRail(positionStart, facingStart, positionEnd, facingEnd, Rail.Shape.QUADRATIC, 0, new ObjectArrayList<>(), transportMode);
 					break;
 				default:
-					rail = Rail.newRail(positionStart, facingStart, positionEnd, facingEnd, newRailType.railShape, 0, "", isOneWay ? 0 : newRailType.speedLimit, newRailType.speedLimit, false, false, newRailType.canAccelerate, newRailType == RailType.RUNWAY, newRailType.hasSignal, transportMode);
+					rail = Rail.newRail(positionStart, facingStart, positionEnd, facingEnd, newRailType.railShape, 0, new ObjectArrayList<>(), isOneWay ? 0 : newRailType.speedLimit, newRailType.speedLimit, false, false, newRailType.canAccelerate, newRailType == RailType.RUNWAY, newRailType.hasSignal, transportMode);
 			}
 
 			if (rail.isValid() && isValidContinuousMovement) {
-				return rail;
+				return PacketUpdateLastRailStyles.SERVER_CACHE.getRailWithLastStyles(uuid, rail);
 			}
 		}
 

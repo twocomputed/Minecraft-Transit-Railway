@@ -1,12 +1,19 @@
 package org.mtr.mod.block;
 
+import org.jetbrains.annotations.NotNull;
+import org.mtr.core.data.Rail;
 import org.mtr.core.data.TransportMode;
 import org.mtr.core.tool.Angle;
 import org.mtr.mapping.holder.*;
-import org.mtr.mapping.mapper.*;
+import org.mtr.mapping.mapper.BlockExtension;
+import org.mtr.mapping.mapper.BlockHelper;
+import org.mtr.mapping.mapper.DirectionHelper;
+import org.mtr.mapping.mapper.TextHelper;
 import org.mtr.mapping.tool.HolderBase;
-import org.mtr.mod.BlockEntityTypes;
 import org.mtr.mod.Init;
+import org.mtr.mod.Items;
+import org.mtr.mod.client.MinecraftClientData;
+import org.mtr.mod.packet.ClientPacketHelper;
 import org.mtr.mod.packet.PacketDeleteData;
 
 import javax.annotation.Nonnull;
@@ -30,6 +37,22 @@ public class BlockNode extends BlockExtension implements DirectionHelper {
 		this.transportMode = transportMode;
 	}
 
+	@NotNull
+	@Override
+	public ActionResult onUse2(BlockState blockState, World world, BlockPos blockPos, PlayerEntity playerEntity, Hand hand, BlockHitResult hit) {
+		if (world.isClient() && playerEntity.isHolding(Items.BRUSH.get())) {
+			final Rail rail = MinecraftClientData.getInstance().getFacingRail(false);
+			if (rail == null) {
+				return ActionResult.FAIL;
+			} else {
+				ClientPacketHelper.openRailShapeModifierScreen(rail.getHexId());
+				return ActionResult.SUCCESS;
+			}
+		} else {
+			return ActionResult.FAIL;
+		}
+	}
+
 	@Override
 	public BlockState getPlacementState2(ItemPlacementContext ctx) {
 		final int quadrant = Angle.getQuadrant(ctx.getPlayerYaw(), true);
@@ -37,7 +60,7 @@ public class BlockNode extends BlockExtension implements DirectionHelper {
 	}
 
 	@Override
-	public void onBreak3(World world, BlockPos pos, BlockState state, PlayerEntity player) {
+	public void onBreak2(World world, BlockPos pos, BlockState state, PlayerEntity player) {
 		if (!world.isClient()) {
 			PacketDeleteData.sendDirectlyToServerRailNodePosition(ServerWorld.cast(world), Init.blockPosToPosition(pos));
 		}
@@ -80,26 +103,6 @@ public class BlockNode extends BlockExtension implements DirectionHelper {
 
 	public static float getAngle(BlockState state) {
 		return (IBlock.getStatePropertySafe(state, BlockNode.FACING) ? 0 : 90) + (IBlock.getStatePropertySafe(state, BlockNode.IS_22_5) ? 22.5F : 0) + (IBlock.getStatePropertySafe(state, BlockNode.IS_45) ? 45 : 0);
-	}
-
-	public static class BlockBoatNode extends BlockNode implements BlockWithEntity {
-
-		public BlockBoatNode() {
-			super(TransportMode.BOAT);
-		}
-
-		@Nonnull
-		@Override
-		public BlockEntityExtension createBlockEntity(BlockPos blockPos, BlockState blockState) {
-			return new BlockEntity(blockPos, blockState);
-		}
-	}
-
-	public static class BlockEntity extends BlockEntityExtension {
-
-		public BlockEntity(BlockPos pos, BlockState state) {
-			super(BlockEntityTypes.BOAT_NODE.get(), pos, state);
-		}
 	}
 
 	public static class BlockContinuousMovementNode extends BlockNode {
